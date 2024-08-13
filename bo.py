@@ -1,4 +1,5 @@
-from typing import Optional
+import math
+from typing import Optional, Tuple
 
 import fire
 import gpytorch
@@ -23,18 +24,28 @@ from bofa.turbo_state import (
 wandb.require("core")
 
 
-def main(seed: int, tags: Optional[list[str]] = None):
+def find_largest_b(N: int) -> Tuple[int, int]:
+    x = (-3 + math.sqrt(9 + 4 * (N - 1))) / 2
+    x = x + 1
+    a = int(math.floor(x))
+    b = int(math.floor((N - a) / a))
+    return a, b
+
+
+def main(seed: int, bsz: int, tags: Optional[list[str]] = None):
     if isinstance(tags, str):
         tags = [tags]
 
-    wandb.init(project="bofa", tags=tags, config={"seed": seed})
+    a, b = find_largest_b(bsz)
+    BSZ = a + a * b
+
+    wandb.init(project="bofa", tags=tags, config={"seed": seed, "bsz": BSZ})
 
     L.seed_everything(seed)
 
     DIM = 60
     DEVICE = torch.device("cuda")
     DTYPE = torch.double
-    BSZ = 100
     N_INIT = 20
     MAX_EVALS = 20_000
 

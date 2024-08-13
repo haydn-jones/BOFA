@@ -1,9 +1,9 @@
 import math
 from dataclasses import asdict, dataclass
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
 import torch
-from botorch.generation import MaxPosteriorSampling
+from botorch.generation.sampling import _flip_sub_unique
 from botorch.models import SingleTaskGP
 from torch import Tensor
 from torch.quasirandom import SobolEngine
@@ -96,7 +96,7 @@ def generate_batch(
     # Sample on the candidate points
     thompson_sampling = MaxPosteriorSampling(model=model, replacement=False)
     with torch.no_grad():  # We don't need gradients when using TS
-        X_next = thompson_sampling(X_cand, num_samples=batch_size)
+        X_next, _ = thompson_sampling(X_cand, num_samples=batch_size)
 
     return X_next
 
@@ -111,3 +111,52 @@ def get_initial_points(
     sobol = SobolEngine(dimension=dim, scramble=True, seed=seed)
     X_init = sobol.draw(n=n_pts).to(dtype=dtype, device=device)
     return X_init
+
+
+class MaxPosteriorSampling(torch.nn.Module):
+    def __init__(
+        self,
+        model: SingleTaskGP,
+        replacement: bool = True,
+    ) -> None:
+        super().__init__()
+
+        self.model = model
+        self.replacement = replacement
+
+    def forward(self, X: Tensor, num_samples: int = 1, observation_noise: bool = False) -> Tuple[Tensor, Tensor]:
+        posterior = self.model.posterior(X, observation_noise=observation_noise)
+        samples = posterior.rsample(sample_shape=torch.Size([num_samples]))
+        return self.maximize_samples(X, samples, num_samples)
+
+    def maximize_samples(self, X: Tensor, samples: Tensor, num_samples: int = 1):
+        obj = samples.squeeze(-1)
+        if self.replacement:
+            idcs = torch.argmax(obj, dim=-1)
+        else:
+            _, idcs_full = torch.topk(obj, num_samples, dim=-1)
+            ridx, cindx = torch.tril_indices(num_samples, num_samples)
+            sub_idcs = idcs_full[ridx, ..., cindx]
+            if sub_idcs.ndim == 1:
+                idcs = _flip_sub_unique(sub_idcs, num_samples)
+            elif sub_idcs.ndim == 2:
+                n_b = sub_idcs.size(-1)
+                idcs = torch.stack(
+                    [_flip_sub_unique(sub_idcs[:, i], num_samples) for i in range(n_b)],
+                    dim=-1,
+                )
+            else:
+                raise NotImplementedError(
+                    "MaxPosteriorSampling without replacement for more than a single "
+                    "batch dimension is not yet implemented."
+                )
+
+        if idcs.ndim > 1:
+            idcs = idcs.permute(*range(1, idcs.ndim), 0)
+
+        idcs = idcs.unsqueeze(-1).expand(*idcs.shape, X.size(-1))
+        Xe = X.expand(*obj.shape[1:], X.size(-1))
+        X_samp = torch.gather(Xe, -2, idcs)
+        acq_score = torch.gather(obj, dim=-1, index=idcs[:, :1])
+
+        return X_samp, acq_score
