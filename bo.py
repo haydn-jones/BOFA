@@ -47,7 +47,7 @@ def main(seed: int, bsz: int, tags: Optional[list[str]] = None):
     DEVICE = torch.device("cuda")
     DTYPE = torch.double
     N_INIT = 20
-    MAX_EVALS = 20_000
+    MAX_EVALS = 15_000
 
     obj = RoverObjective(dim=DIM, dtype=DTYPE)
 
