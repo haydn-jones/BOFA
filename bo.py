@@ -6,11 +6,6 @@ import gpytorch
 import lightning as L
 import torch
 from botorch.fit import fit_gpytorch_mll
-from botorch.models import SingleTaskGP
-from gpytorch.constraints import Interval
-from gpytorch.kernels import MaternKernel, ScaleKernel
-from gpytorch.likelihoods import GaussianLikelihood
-from gpytorch.mlls import ExactMarginalLogLikelihood
 
 import wandb
 from bofa.tasks.rover import RoverObjective
@@ -20,6 +15,7 @@ from bofa.turbo_state import (
     get_initial_points,
     update_state,
 )
+from bofa.utils import get_turbo_gp
 
 wandb.require("core")
 
@@ -46,8 +42,8 @@ def main(seed: int, bsz: int, tags: Optional[list[str]] = None):
     DIM = 60
     DEVICE = torch.device("cuda")
     DTYPE = torch.double
-    N_INIT = 20
-    MAX_EVALS = 15_000
+    N_INIT = 100
+    MAX_EVALS = 10_000
 
     obj = RoverObjective(dim=DIM, dtype=DTYPE)
 
@@ -60,17 +56,9 @@ def main(seed: int, bsz: int, tags: Optional[list[str]] = None):
 
     while True:
         train_Y = (Y_turbo - Y_turbo.mean()) / Y_turbo.std()
-        likelihood = GaussianLikelihood(noise_constraint=Interval(1e-8, 1e-3))
-        covar_module = ScaleKernel(
-            MaternKernel(
-                nu=2.5,
-                ard_num_dims=DIM,
-            )
-        )
-        model = SingleTaskGP(X_turbo, train_Y, covar_module=covar_module, likelihood=likelihood)
+        model, mll = get_turbo_gp(X_turbo, train_Y, DIM)
 
-        mll = ExactMarginalLogLikelihood(model.likelihood, model)
-        with gpytorch.settings.max_cholesky_size(float("inf")):
+        with gpytorch.settings.max_cholesky_size(2000):
             fit_gpytorch_mll(mll)
 
             X_next = generate_batch(

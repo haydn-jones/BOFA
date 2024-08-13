@@ -1,9 +1,9 @@
 import torch
+from botorch.utils.transforms import unnormalize
+from torch import Tensor
 
 from bofa.tasks.objective import Objective
 from bofa.tasks.utils.robopush_utils import PushReward
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class RobotPushing(Objective):
@@ -13,12 +13,13 @@ class RobotPushing(Objective):
 
     def __init__(
         self,
-        dtype=torch.float32,
+        dtype: torch.dtype = torch.float32,
         **kwargs,
     ):
         self.robot_push_func = PushReward()
-        lb = torch.tensor(self.robot_push_func.xmin).to(dtype=dtype)
-        ub = torch.tensor(self.robot_push_func.xmax).to(dtype=dtype)
+
+        lb = self.robot_push_func.xmin
+        ub = self.robot_push_func.xmax
 
         super().__init__(
             dim=14,
@@ -28,14 +29,16 @@ class RobotPushing(Objective):
             **kwargs,
         )
 
-    def f(self, x):
+    def f(self, x: Tensor) -> float:
+        x = x.cpu()
+        bounds = torch.stack(
+            [
+                torch.tensor(self.lb, dtype=self.dtype),
+                torch.tensor(self.ub, dtype=self.dtype),
+            ]
+        )
+        x = unnormalize(x, bounds)
+
         self.num_calls += 1
         y = self.robot_push_func(x.numpy())
-        return y
-
-
-if __name__ == "__main__":
-    obj = RobotPushing()
-    xs = torch.rand(3, obj.dim) * (obj.ub - obj.lb) + obj.lb
-    ys = obj(xs)
-    print(xs.shape, ys.shape, ys, obj.num_calls)
+        return float(y)

@@ -13,15 +13,16 @@ from torch.quasirandom import SobolEngine
 class TurboState:
     dim: int
     batch_size: int
-    length: float = 0.8
     length_min: float = 0.5**7
     length_max: float = 1.6
-    failure_counter: int = 0
     failure_tolerance: int = 2
-    success_counter: int = 0
-    success_tolerance: int = 10
+    success_tolerance: int = 3
+
+    length: float = 0.8
     best_value: float = -float("inf")
     restart_triggered: bool = False
+    success_counter: int = 0
+    failure_counter: int = 0
 
     def __post_init__(self):
         self.failure_tolerance = math.ceil(max([4.0 / self.batch_size, float(self.dim) / self.batch_size]))
