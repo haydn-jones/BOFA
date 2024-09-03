@@ -152,6 +152,9 @@ class Optimize(ABC):
             if self.lolbo_state.new_best_found:
                 self.print_progress_update()
                 self.lolbo_state.new_best_found = False
+        
+        # Log final data to wandb
+        self.log_data_to_wandb_on_each_loop()
 
         print("\nOptimization Run Finished, Final Results:")
         self.print_progress_update()

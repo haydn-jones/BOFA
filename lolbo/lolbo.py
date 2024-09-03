@@ -303,18 +303,28 @@ def split_acq(
         acqf=acqf,
     )
 
-    with torch.no_grad():
-        fant = gp.variational_strategy.get_fantasy_model(z_a, scores_a.flatten())
-        fant = inject_post_func(fant)
+    try:
+        with torch.no_grad():
+            fant = gp.variational_strategy.get_fantasy_model(z_a, scores_a.flatten())
+            fant = inject_post_func(fant)
 
-    z_b, _ = generate_batch(
-        state=tr_state,
-        gp=fant,
-        X=X,
-        Y=Y,
-        batch_size=b,
-        acqf=acqf,
-    )
+        z_b, _ = generate_batch(
+            state=tr_state,
+            gp=fant,
+            X=X,
+            Y=Y,
+            batch_size=b,
+            acqf=acqf,
+        )
+    except: # Failed to fantasize, just generate the other portion
+        z_b, scores_b = generate_batch(
+            state=tr_state,
+            gp=gp,
+            X=X,
+            Y=Y,
+            batch_size=b,
+            acqf=acqf,
+        )
 
     z_next = torch.cat((z_a, z_b), dim=0)
 

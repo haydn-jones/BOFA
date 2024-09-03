@@ -1,5 +1,3 @@
-import fire
-
 from lolbo.molecule_objective import MoleculeObjective
 from lolbo.utils.mol_utils.load_data import compute_train_zs, load_molecule_train_data
 from scripts.optimize import Optimize
@@ -18,7 +16,7 @@ class MoleculeOptimization(Optimize):
     def __init__(
         self,
         path_to_vae_statedict: str = "lolbo/utils/mol_utils/selfies_vae/state_dict/SELFIES-VAE-state-dict.pt",
-        max_string_length: int = 400,
+        max_string_length: int = 256,
         **kwargs,
     ):
         self.path_to_vae_statedict = path_to_vae_statedict
@@ -70,6 +68,35 @@ class MoleculeOptimization(Optimize):
         for ix, smile in enumerate(self.init_train_x):
             self.init_smiles_to_selfies[smile] = selfies[ix]
 
+def hpo():
+    import os
+    import runai.hpo
+
+    strategy = runai.hpo.Strategy.GridSearch
+
+    hpo_root = './tmp'
+    hpo_experiment = '%s_%s' % (os.getenv('JOB_NAME'), os.getenv('JOB_UUID'))
+
+    runai.hpo.init(hpo_root, hpo_experiment)
+
+    config = runai.hpo.pick(
+        grid=dict(
+            acq_method=["vanilla", "half", "quad"],
+            seed=[0, 1, 2, 3, 4, 5, 6, 7],
+            bsz=[50, 100],
+            task_id=["zale", "rano", "pdop"],
+        ),
+        strategy=strategy,
+    )
+
+    config['max_n_oracle_calls'] = 80_000
+
+    obj = MoleculeOptimization(**config)
+
+    obj.run_lolbo()
+    obj.done()
+
+    runai.hpo.report(epoch=None, metrics=None)
 
 if __name__ == "__main__":
-    fire.Fire(MoleculeOptimization)
+    hpo()
