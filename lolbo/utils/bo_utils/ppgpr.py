@@ -3,7 +3,7 @@ from typing import Tuple
 
 import gpytorch
 from botorch.posteriors.gpytorch import GPyTorchPosterior
-from gpytorch.models import ApproximateGP
+from gpytorch.models import GP, ApproximateGP
 from gpytorch.variational import CholeskyVariationalDistribution, VariationalStrategy
 from torch import Tensor, nn
 
@@ -87,3 +87,15 @@ class DenseNetwork(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self.layers(x)
+
+
+def inject_post_func(obj: GP) -> GP:
+    def posterior(self, X: Tensor, *args, **kwargs) -> GPyTorchPosterior:  # noqa: ANN001
+        self.eval()
+        self.likelihood.eval()
+        dist = self.likelihood(self(X))
+        return GPyTorchPosterior(dist)
+
+    obj.posterior = posterior.__get__(obj, obj.__class__)
+
+    return obj

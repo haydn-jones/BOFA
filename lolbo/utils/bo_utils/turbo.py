@@ -101,7 +101,8 @@ def generate_batch(
 
         # Sample on the candidate points
         thompson_sampling = MaxPosteriorSampling(model=gp, replacement=False)
-        X_next, scores = thompson_sampling(X_cand.cuda(), num_samples=batch_size)
+        with torch.no_grad():
+            X_next, scores = thompson_sampling(X_cand.cuda(), num_samples=batch_size)
 
     return X_next, scores
 

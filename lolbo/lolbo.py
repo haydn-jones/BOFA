@@ -1,12 +1,16 @@
 import math
+from typing import Literal, Tuple
 
 import gpytorch
 import torch
 from gpytorch.mlls import PredictiveLogLikelihood
+from torch import Tensor
 
-from lolbo.utils.bo_utils.ppgpr import GPModelDKL
+from lolbo.utils.bo_utils.ppgpr import ApproximateGP, GPModelDKL, inject_post_func
 from lolbo.utils.bo_utils.turbo import TurboState, generate_batch, update_state
 from lolbo.utils.utils import update_models_end_to_end, update_surr_model
+
+AcqMethod = Literal["vanilla", "half", "quad"]
 
 
 class LOLBOState:
@@ -16,6 +20,7 @@ class LOLBOState:
         train_x,
         train_y,
         train_z,
+        acq_method: AcqMethod,
         k=1_000,
         num_update_epochs=2,
         init_n_epochs=20,
@@ -35,6 +40,8 @@ class LOLBOState:
         self.acq_func = acq_func  # acquisition function (Expected Improvement (ei) or Thompson Sampling (ts))
 
         assert acq_func in ["ei", "ts"]
+
+        self.acq_method = acq_method
 
         self.progress_fails_since_last_e2e = 0
         self.tot_num_e2e_updates = 0
@@ -206,16 +213,41 @@ class LOLBOState:
         """Generate new candidate points,
         evaluate them, and update data
         """
-        # 1. Generate a batch of candidates in
-        #   trust region using surrogate model
-        z_next, scores = generate_batch(
-            state=self.tr_state,
-            gp=self.model,
-            X=self.train_z,
-            Y=self.train_y,
-            batch_size=self.bsz,
-            acqf=self.acq_func,
-        )
+        if self.acq_method == "vanilla":
+            z_next = vanilla_acq(
+                tr_state=self.tr_state,
+                gp=self.model,
+                X=self.train_z,
+                Y=self.train_y,
+                batch_size=self.bsz,
+                acqf=self.acq_func,
+            )
+        elif self.acq_method == "half":
+            a = int(self.bsz / 2)
+            b = self.bsz - a
+
+            z_next = split_acq(
+                tr_state=self.tr_state,
+                gp=self.model,
+                X=self.train_z,
+                Y=self.train_y,
+                a=a,
+                b=b,
+                acqf=self.acq_func,
+            )
+        elif self.acq_method == "quad":
+            a, b = solve_b(self.bsz)
+            z_next = split_acq(
+                tr_state=self.tr_state,
+                gp=self.model,
+                X=self.train_z,
+                Y=self.train_y,
+                a=a,
+                b=b,
+                acqf=self.acq_func,
+            )
+        else:
+            raise ValueError("Invalid acquisition method")
 
         # 2. Evaluate the batch of candidates by calling oracle
         with torch.no_grad():
@@ -231,3 +263,65 @@ class LOLBOState:
         else:
             self.progress_fails_since_last_e2e += 1
             print("GOT NO VALID Y_NEXT TO UPDATE DATA, RERUNNING ACQUISITOIN...")
+
+
+def vanilla_acq(
+    tr_state: TurboState,
+    gp: ApproximateGP,
+    X: Tensor,
+    Y: Tensor,
+    batch_size: int,
+    acqf: str,
+):
+    z_next, scores = generate_batch(
+        state=tr_state,
+        gp=gp,
+        X=X,
+        Y=Y,
+        batch_size=batch_size,
+        acqf=acqf,
+    )
+
+    return z_next
+
+
+def split_acq(
+    tr_state: TurboState,
+    gp: ApproximateGP,
+    X: Tensor,
+    Y: Tensor,
+    a: int,
+    b: int,
+    acqf: str,
+):
+    z_a, scores_a = generate_batch(
+        state=tr_state,
+        gp=gp,
+        X=X,
+        Y=Y,
+        batch_size=a,
+        acqf=acqf,
+    )
+
+    with torch.no_grad():
+        fant = gp.variational_strategy.get_fantasy_model(z_a, scores_a.flatten())
+        fant = inject_post_func(fant)
+
+    z_b, _ = generate_batch(
+        state=tr_state,
+        gp=fant,
+        X=X,
+        Y=Y,
+        batch_size=b,
+        acqf=acqf,
+    )
+
+    z_next = torch.cat((z_a, z_b), dim=0)
+
+    return z_next
+
+
+def solve_b(N: int) -> Tuple[int, int]:
+    a = math.floor(0.5 * math.sqrt(4 * N + 1) - 1)
+    b = N - a
+    return a, b

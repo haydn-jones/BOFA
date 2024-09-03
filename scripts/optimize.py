@@ -6,7 +6,7 @@ import lightning as L
 import torch
 
 import wandb
-from lolbo.lolbo import LOLBOState
+from lolbo.lolbo import AcqMethod, LOLBOState
 
 torch.set_num_threads(1)
 
@@ -39,6 +39,7 @@ class Optimize(ABC):
     def __init__(
         self,
         task_id: str,
+        acq_method: AcqMethod,
         seed: int = 0,
         wandb_entity: str = "molformers",
         wandb_project_name: str = "bla",
@@ -80,6 +81,7 @@ class Optimize(ABC):
             train_y=self.init_train_y,  # type: ignore
             train_z=self.init_train_z,  # type: ignore
             k=k,
+            acq_method=acq_method,
             num_update_epochs=num_update_epochs,
             init_n_epochs=init_n_update_epochs,
             learning_rte=learning_rte,
